@@ -1,0 +1,28 @@
+.DS_Store
+
+# Build outputs
+build/
+build-current/
+build-universal-live/
+cmake-build-*/
+
+# JUCE/CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.xcodeproj/
+
+# Audio plugin artifacts
+*.component/
+*.vst3/
+*.a
+*.dSYM/
+
+# Local asset experiments/backups
+Source/Assets/*_20260511.png
+
+# Local/editor noise
+.idea/
+.vscode/
+*.swp

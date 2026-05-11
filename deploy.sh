@@ -1,0 +1,40 @@
+#!/bin/bash
+set -euo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+BUILD_DIR="$PROJECT_ROOT/build-universal-live"
+CMAKE_BIN="${CMAKE_BIN:-/usr/local/bin/cmake}"
+AU_BUNDLE="$BUILD_DIR/PWMMadness_artefacts/AU/PWM Madness.component"
+VST3_BUNDLE="$BUILD_DIR/PWMMadness_artefacts/VST3/PWM Madness.vst3"
+AU_DEST="$HOME/Library/Audio/Plug-Ins/Components/PWM Madness.component"
+VST3_DEST="$HOME/Library/Audio/Plug-Ins/VST3/PWM Madness.vst3"
+
+if [ ! -x "$CMAKE_BIN" ]; then
+    CMAKE_BIN="$(command -v cmake)"
+fi
+
+for required_tool in "$CMAKE_BIN" ditto; do
+    if ! command -v "$required_tool" >/dev/null 2>&1; then
+        echo "Missing required tool: $required_tool" >&2
+        exit 1
+    fi
+done
+
+mkdir -p "$HOME/Library/Audio/Plug-Ins/Components" "$HOME/Library/Audio/Plug-Ins/VST3"
+
+"$CMAKE_BIN" -S "$PROJECT_ROOT" -B "$BUILD_DIR" -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+"$CMAKE_BIN" --build "$BUILD_DIR" --target PWMMadness_AU PWMMadness_VST3
+
+if [ ! -d "$AU_BUNDLE" ]; then
+    echo "AU build did not produce: $AU_BUNDLE" >&2
+    exit 1
+fi
+
+if [ ! -d "$VST3_BUNDLE" ]; then
+    echo "VST3 build did not produce: $VST3_BUNDLE" >&2
+    exit 1
+fi
+
+ditto "$AU_BUNDLE" "$AU_DEST"
+ditto "$VST3_BUNDLE" "$VST3_DEST"
+echo "✓ PWM Madness deployed"
