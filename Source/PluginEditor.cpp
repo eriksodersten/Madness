@@ -114,29 +114,22 @@ PWMMadnessAudioProcessorEditor::PWMMadnessAudioProcessorEditor(PWMMadnessAudioPr
     setSize(kEditorWidth, kEditorHeight);
     setLookAndFeel(&lookAndFeel);
 
-    modeBox.addItem("MIDI", 1);
-    modeBox.addItem("ALWAYS", 2);
-    octaveBox.addItem("-2", 1);
-    octaveBox.addItem("-1", 2);
-    octaveBox.addItem("0", 3);
-    octaveBox.addItem("+1", 4);
-    octaveBox.addItem("+2", 5);
-    setupCombo(modeBox);
-    setupCombo(octaveBox);
-    addAndMakeVisible(modeBox);
-    addAndMakeVisible(octaveBox);
+    modeToggle.setAlpha(0.0f);
+    modeToggle.setClickingTogglesState(true);
+    modeToggle.onStateChange = [this] { repaint(); };
+    addAndMakeVisible(modeToggle);
 
     for (auto* slider : { &tune, &attack, &release, &osc1PW, &osc2PW, &osc2Detune, &oscMix,
                          &subLevel, &pwmDepth, &pwmRate, &filterCutoff, &filterResonance,
-                         &drive, &outputGain, &madness })
+                         &drive, &outputGain, &madness, &octave })
     {
         setupSlider(*slider);
         addAndMakeVisible(*slider);
     }
 
     auto& state = audioProcessor.apvts;
-    modeAttachment = std::make_unique<ComboAttachment>(state, "mode", modeBox);
-    octaveAttachment = std::make_unique<ComboAttachment>(state, "octave", octaveBox);
+    modeAttachment = std::make_unique<ButtonAttachment>(state, "mode", modeToggle);
+    octaveAttachment = std::make_unique<SliderAttachment>(state, "octave", octave);
     tuneAttachment = std::make_unique<SliderAttachment>(state, "tune", tune);
     attackAttachment = std::make_unique<SliderAttachment>(state, "attack", attack);
     releaseAttachment = std::make_unique<SliderAttachment>(state, "release", release);
@@ -167,12 +160,6 @@ void PWMMadnessAudioProcessorEditor::setupSlider(MadnessSlider& slider)
     slider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
     slider.setAlpha(0.0f);
     slider.onValueChange = [this] { repaint(); };
-}
-
-void PWMMadnessAudioProcessorEditor::setupCombo(juce::ComboBox& box)
-{
-    box.setJustificationType(juce::Justification::centred);
-    box.setAlpha(0.0f);
 }
 
 juce::Rectangle<int> PWMMadnessAudioProcessorEditor::ref(float x, float y, float w, float h) const
@@ -239,14 +226,78 @@ void PWMMadnessAudioProcessorEditor::paintOverChildren(juce::Graphics& g)
 
     for (auto* slider : { &tune, &attack, &release, &osc1PW, &osc2PW, &osc2Detune, &oscMix,
                          &subLevel, &pwmDepth, &pwmRate, &filterCutoff, &filterResonance,
-                         &drive, &outputGain, &madness })
+                         &drive, &outputGain, &madness, &octave })
         drawPointer(*slider);
+
+    const bool alwaysOn = modeToggle.getToggleState();
+    {
+        const auto led = ref(896.0f, 292.0f, 19.0f, 19.0f).toFloat();
+        const auto centre = led.getCentre();
+
+        if (alwaysOn)
+        {
+            const auto glow = led.expanded(9.0f);
+            juce::ColourGradient amberGlow(juce::Colour(0xffffb037).withAlpha(0.56f), centre.x, centre.y,
+                                           juce::Colours::transparentBlack, glow.getRight(), centre.y, true);
+            amberGlow.addColour(0.34, juce::Colour(0xffff6f19).withAlpha(0.28f));
+            g.setGradientFill(amberGlow);
+            g.fillEllipse(glow);
+        }
+
+        juce::ColourGradient lens(alwaysOn ? juce::Colour(0xffffd162) : juce::Colour(0xff4b140d),
+                                  centre.x - led.getWidth() * 0.24f, led.getY(),
+                                  alwaysOn ? juce::Colour(0xffb93110) : juce::Colour(0xff170806),
+                                  centre.x + led.getWidth() * 0.32f, led.getBottom(), false);
+        lens.addColour(0.55, alwaysOn ? juce::Colour(0xffff761e) : juce::Colour(0xff260906));
+        g.setGradientFill(lens);
+        g.fillEllipse(led);
+
+        g.setColour(kInk.withAlpha(0.72f));
+        g.drawEllipse(led, 1.2f);
+
+        if (alwaysOn)
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.72f));
+            g.fillEllipse(led.withSizeKeepingCentre(led.getWidth() * 0.28f, led.getHeight() * 0.28f)
+                              .translated(-led.getWidth() * 0.12f, -led.getHeight() * 0.16f));
+        }
+    }
+
+    {
+        const auto b = modeToggle.getBounds().toFloat();
+        const float rx = 6.0f;
+        g.setColour(juce::Colour(0xff1a1410));
+        g.fillRoundedRectangle(b, rx);
+        g.setColour(kInk);
+        g.drawRoundedRectangle(b.reduced(0.5f), rx, 1.2f);
+
+        const float ballDiam = b.getHeight() * 0.72f;
+        const float margin = (b.getHeight() - ballDiam) * 0.5f;
+        const float ballX = alwaysOn
+            ? b.getRight() - margin - ballDiam
+            : b.getX() + margin;
+        const auto ball = juce::Rectangle<float>(ballX, b.getY() + margin, ballDiam, ballDiam);
+        const auto centre = ball.getCentre();
+
+        g.setColour(juce::Colours::black.withAlpha(0.3f));
+        g.fillEllipse(ball.translated(1.0f, 2.0f));
+
+        juce::ColourGradient chrome(kChromeLight, centre.x - ballDiam * 0.25f, ball.getY(),
+                                    kChromeDark, centre.x + ballDiam * 0.25f, ball.getBottom(), false);
+        chrome.addColour(0.48, kChromeMid);
+        chrome.addColour(0.62, juce::Colour(0xfff7f4ea));
+        g.setGradientFill(chrome);
+        g.fillEllipse(ball);
+        g.setColour(kInk);
+        g.drawEllipse(ball, 1.5f);
+    }
+
 }
 
 void PWMMadnessAudioProcessorEditor::resized()
 {
-    modeBox.setBounds(ref(824, 226, 62, 43));
-    octaveBox.setBounds(ref(1077, 216, 82, 82));
+    modeToggle.setBounds(ref(824, 226, 62, 43));
+    octave.setBounds(ref(1077, 216, 82, 82));
 
     tune.setBounds(ref(955, 216, 82, 82));
     attack.setBounds(ref(1212, 216, 82, 82));

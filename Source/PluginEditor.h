@@ -36,18 +36,17 @@ public:
 
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
-    using ComboAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     void setupSlider(MadnessSlider&);
-    void setupCombo(juce::ComboBox&);
     juce::Rectangle<int> ref(float x, float y, float w, float h) const;
 
     PWMMadnessAudioProcessor& audioProcessor;
     PWMMadnessLookAndFeel lookAndFeel;
     juce::Image background;
 
-    juce::ComboBox modeBox;
-    juce::ComboBox octaveBox;
+    juce::ToggleButton modeToggle;
+    MadnessSlider octave;
 
     MadnessSlider tune;
     MadnessSlider attack;
@@ -65,8 +64,8 @@ private:
     MadnessSlider outputGain;
     MadnessSlider madness { true };
 
-    std::unique_ptr<ComboAttachment> modeAttachment;
-    std::unique_ptr<ComboAttachment> octaveAttachment;
+    std::unique_ptr<ButtonAttachment> modeAttachment;
+    std::unique_ptr<SliderAttachment> octaveAttachment;
     std::unique_ptr<SliderAttachment> tuneAttachment;
     std::unique_ptr<SliderAttachment> attackAttachment;
     std::unique_ptr<SliderAttachment> releaseAttachment;

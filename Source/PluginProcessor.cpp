@@ -18,9 +18,9 @@ float dbToGain(float db)
     return juce::Decibels::decibelsToGain(db);
 }
 
-float currentRootFrequency(bool alwaysOn, float currentMidiNote, float tuneSemis, int octaveChoice)
+float currentRootFrequency(bool alwaysOn, float currentMidiNote, float tuneSemis, int octave)
 {
-    const float octaveSemis = static_cast<float>(octaveChoice - 2) * 12.0f;
+    const float octaveSemis = static_cast<float>(octave) * 12.0f;
     const float baseNote = alwaysOn ? 36.0f : currentMidiNote;
     const float noteNumber = baseNote + tuneSemis + octaveSemis;
     return 440.0f * std::pow(2.0f, (noteNumber - 69.0f) / 12.0f);
@@ -31,11 +31,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout PWMMadnessAudioProcessor::cr
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
-    params.push_back(std::make_unique<juce::AudioParameterChoice>("mode", "Mode",
-        juce::StringArray { "MIDI", "Always On" }, 0));
+    params.push_back(std::make_unique<juce::AudioParameterBool>("mode", "Mode", false));
     params.push_back(std::make_unique<juce::AudioParameterFloat>("tune", "Tune", -12.0f, 12.0f, 0.0f));
-    params.push_back(std::make_unique<juce::AudioParameterChoice>("octave", "Octave",
-        juce::StringArray { "-2", "-1", "0", "+1", "+2" }, 2));
+    params.push_back(std::make_unique<juce::AudioParameterInt>("octave", "Octave", -2, 2, 0));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>("attack", "Attack",
         skewedRange(0.001f, 5.0f, 0.08f), 0.02f));
