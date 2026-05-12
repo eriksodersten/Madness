@@ -3,10 +3,10 @@
 
 namespace
 {
-constexpr int kEditorWidth = 900;
+constexpr int kEditorWidth = 909;
 constexpr int kEditorHeight = 675;
-constexpr float kReferenceWidth = 1448.0f;
-constexpr float kReferenceHeight = 1086.0f;
+constexpr float kReferenceWidth = 1492.0f;
+constexpr float kReferenceHeight = 1108.0f;
 
 const juce::Colour kInk(0xff18110e);
 const juce::Colour kCream(0xffefe0bf);
