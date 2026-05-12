@@ -17,6 +17,14 @@ float dbToGain(float db)
 {
     return juce::Decibels::decibelsToGain(db);
 }
+
+float currentRootFrequency(bool alwaysOn, float currentMidiNote, float tuneSemis, int octaveChoice)
+{
+    const float octaveSemis = static_cast<float>(octaveChoice - 2) * 12.0f;
+    const float baseNote = alwaysOn ? 36.0f : currentMidiNote;
+    const float noteNumber = baseNote + tuneSemis + octaveSemis;
+    return 440.0f * std::pow(2.0f, (noteNumber - 69.0f) / 12.0f);
+}
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout PWMMadnessAudioProcessor::createParameterLayout()
@@ -73,6 +81,7 @@ void PWMMadnessAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBl
     lfoPhase = 0.0f;
     dcX1 = 0.0f;
     dcY1 = 0.0f;
+    resetSmoothedValues(sampleRate);
 
     juce::dsp::ProcessSpec spec { sampleRate, static_cast<juce::uint32>(samplesPerBlock), 1 };
     lowpass.prepare(spec);
@@ -111,27 +120,111 @@ float PWMMadnessAudioProcessor::onePoleHighpass(float input, float& x1, float& y
     return y;
 }
 
-void PWMMadnessAudioProcessor::handleMidi(const juce::MidiBuffer& midiMessages)
+float PWMMadnessAudioProcessor::fastTanh(float x) noexcept
 {
-    for (const auto metadata : midiMessages)
+    if (x >  3.0f) return  1.0f;
+    if (x < -3.0f) return -1.0f;
+    const float x2 = x * x;
+    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+}
+
+float PWMMadnessAudioProcessor::polyBlep(float phase, float phaseStep)
+{
+    if (phaseStep <= 0.0f)
+        return 0.0f;
+
+    if (phase < phaseStep)
     {
-        const auto message = metadata.getMessage();
-        if (message.isNoteOn())
-        {
-            currentMidiNote = static_cast<float>(message.getNoteNumber());
-            gate = true;
-            ampEnvelope.noteOn();
-        }
-        else if (message.isNoteOff() && message.getNoteNumber() == juce::roundToInt(currentMidiNote))
-        {
-            gate = false;
-            ampEnvelope.noteOff();
-        }
-        else if (message.isAllNotesOff() || message.isAllSoundOff())
-        {
-            gate = false;
-            ampEnvelope.noteOff();
-        }
+        phase /= phaseStep;
+        return phase + phase - phase * phase - 1.0f;
+    }
+
+    if (phase > 1.0f - phaseStep)
+    {
+        phase = (phase - 1.0f) / phaseStep;
+        return phase * phase + phase + phase + 1.0f;
+    }
+
+    return 0.0f;
+}
+
+float PWMMadnessAudioProcessor::PulseOscillator::process(float frequency, float duty, float sampleRate)
+{
+    const float phaseStep = juce::jlimit(0.0f, 0.5f, frequency / sampleRate);
+    phase += phaseStep;
+    phase -= std::floor(phase);
+
+    float sample = phase < duty ? 1.0f : -1.0f;
+    sample += PWMMadnessAudioProcessor::polyBlep(phase, phaseStep);
+
+    float fallingEdgePhase = phase - duty;
+    if (fallingEdgePhase < 0.0f)
+        fallingEdgePhase += 1.0f;
+    sample -= PWMMadnessAudioProcessor::polyBlep(fallingEdgePhase, phaseStep);
+
+    return sample;
+}
+
+void PWMMadnessAudioProcessor::resetSmoothedValues(double sampleRate)
+{
+    constexpr double kControlSmoothingSeconds = 0.010;
+    constexpr double kPitchSmoothingSeconds = 0.004;
+
+    smoothedRootFrequency.reset(sampleRate, kPitchSmoothingSeconds);
+    smoothedOsc1PW.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedOsc2PW.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedOscMix.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedSubLevel.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedPwmDepth.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedPwmRate.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedAttack.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedRelease.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedDrive.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedOutputGain.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedCutoff.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedResonance.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedMadness.reset(sampleRate, kControlSmoothingSeconds);
+    smoothedDetune.reset(sampleRate, kControlSmoothingSeconds);
+
+    dcCoeff = 1.0f - (juce::MathConstants<float>::twoPi * 35.0f / (float)sampleRate);
+
+    const bool alwaysOn = readChoice("mode") == 1;
+    const float rootFrequency = currentRootFrequency(alwaysOn, currentMidiNote, readFloat("tune"), readChoice("octave"));
+
+    smoothedRootFrequency.setCurrentAndTargetValue(rootFrequency);
+    smoothedOsc1PW.setCurrentAndTargetValue(readFloat("osc1PW"));
+    smoothedOsc2PW.setCurrentAndTargetValue(readFloat("osc2PW"));
+    smoothedOscMix.setCurrentAndTargetValue(readFloat("oscMix"));
+    smoothedSubLevel.setCurrentAndTargetValue(readFloat("subLevel"));
+    smoothedPwmDepth.setCurrentAndTargetValue(readFloat("pwmDepth"));
+    smoothedPwmRate.setCurrentAndTargetValue(readFloat("pwmRate"));
+    smoothedAttack.setCurrentAndTargetValue(readFloat("attack"));
+    smoothedRelease.setCurrentAndTargetValue(readFloat("release"));
+    smoothedDrive.setCurrentAndTargetValue(readFloat("drive"));
+    smoothedOutputGain.setCurrentAndTargetValue(dbToGain(readFloat("outputGain")));
+    smoothedCutoff.setCurrentAndTargetValue(readFloat("filterCutoff"));
+    smoothedResonance.setCurrentAndTargetValue(readFloat("filterResonance"));
+    smoothedMadness.setCurrentAndTargetValue(readFloat("madness"));
+    smoothedDetune.setCurrentAndTargetValue(std::pow(2.0f, readFloat("osc2Detune") / 1200.0f));
+}
+
+void PWMMadnessAudioProcessor::handleMidiMessage(const juce::MidiMessage& message)
+{
+    if (message.isNoteOn())
+    {
+        currentMidiNote = static_cast<float>(message.getNoteNumber());
+        gate = true;
+        ampEnvelope.noteOn();
+    }
+    else if (message.isNoteOff() && message.getNoteNumber() == juce::roundToInt(currentMidiNote))
+    {
+        gate = false;
+        ampEnvelope.noteOff();
+    }
+    else if (message.isAllNotesOff() || message.isAllSoundOff())
+    {
+        gate = false;
+        ampEnvelope.noteOff();
     }
 }
 
@@ -139,7 +232,6 @@ void PWMMadnessAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
 {
     juce::ScopedNoDenormals noDenormals;
     buffer.clear();
-    handleMidi(midiMessages);
 
     const int numSamples = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
@@ -154,52 +246,83 @@ void PWMMadnessAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
 
     const float tuneSemis = readFloat("tune");
     const int octaveChoice = readChoice("octave");
-    const float octaveSemis = static_cast<float>(octaveChoice - 2) * 12.0f;
-    const float baseNote = alwaysOn ? 36.0f : currentMidiNote;
-    const float rootFrequency = midiNoteToHz(baseNote + tuneSemis + octaveSemis);
-    const float detuneRatio = std::pow(2.0f, readFloat("osc2Detune") / 1200.0f);
 
-    const float oscMix = readFloat("oscMix");
-    const float subLevel = readFloat("subLevel");
-    const float madness = readFloat("madness");
-    const float pwmDepth = juce::jlimit(0.0f, 0.46f, readFloat("pwmDepth") + madness * 0.20f);
-    const float pwmRate = readFloat("pwmRate") * (1.0f + madness * 0.35f);
-    const float attack = readFloat("attack");
-    const float release = readFloat("release");
-    const float drive = readFloat("drive") * (1.0f + madness * 1.8f);
-    const float output = dbToGain(readFloat("outputGain"));
-
-    const float cutoff = juce::jlimit(30.0f, 16000.0f,
-        readFloat("filterCutoff") * (1.0f + madness * 0.18f));
-    const float resonance = juce::jlimit(0.0f, 0.96f, readFloat("filterResonance") + madness * 0.10f);
-    lowpass.setCutoffFrequency(cutoff);
-    lowpass.setResonance(0.5f + resonance * 8.0f);
+    smoothedRootFrequency.setTargetValue(currentRootFrequency(alwaysOn, currentMidiNote, tuneSemis, octaveChoice));
+    smoothedOsc1PW.setTargetValue(readFloat("osc1PW"));
+    smoothedOsc2PW.setTargetValue(readFloat("osc2PW"));
+    smoothedOscMix.setTargetValue(readFloat("oscMix"));
+    smoothedSubLevel.setTargetValue(readFloat("subLevel"));
+    smoothedPwmDepth.setTargetValue(readFloat("pwmDepth"));
+    smoothedPwmRate.setTargetValue(readFloat("pwmRate"));
+    smoothedAttack.setTargetValue(readFloat("attack"));
+    smoothedRelease.setTargetValue(readFloat("release"));
+    smoothedDrive.setTargetValue(readFloat("drive"));
+    smoothedOutputGain.setTargetValue(dbToGain(readFloat("outputGain")));
+    smoothedCutoff.setTargetValue(readFloat("filterCutoff"));
+    smoothedResonance.setTargetValue(readFloat("filterResonance"));
+    smoothedMadness.setTargetValue(readFloat("madness"));
+    smoothedDetune.setTargetValue(std::pow(2.0f, readFloat("osc2Detune") / 1200.0f));
 
     auto* left = buffer.getWritePointer(0);
     auto* right = numChannels > 1 ? buffer.getWritePointer(1) : nullptr;
 
+    auto midiIterator = midiMessages.cbegin();
+    const auto midiEnd = midiMessages.cend();
+
     for (int sample = 0; sample < numSamples; ++sample)
     {
+        while (midiIterator != midiEnd && (*midiIterator).samplePosition <= sample)
+        {
+            if (!alwaysOn)
+            {
+                handleMidiMessage((*midiIterator).getMessage());
+                smoothedRootFrequency.setTargetValue(currentRootFrequency(false, currentMidiNote, tuneSemis, octaveChoice));
+            }
+            ++midiIterator;
+        }
+
+        const float madness = smoothedMadness.getNextValue();
+        const float pwmDepth = juce::jlimit(0.0f, 0.46f, smoothedPwmDepth.getNextValue() + madness * 0.20f);
+        const float pwmRate = smoothedPwmRate.getNextValue() * (1.0f + madness * 0.35f);
+
         lfoPhase += pwmRate / static_cast<float>(currentSampleRate);
         lfoPhase -= std::floor(lfoPhase);
         const float lfo = std::sin(lfoPhase * juce::MathConstants<float>::twoPi);
 
-        const float duty1 = juce::jlimit(kMinPulseWidth, kMaxPulseWidth, readFloat("osc1PW") + lfo * pwmDepth);
-        const float duty2 = juce::jlimit(kMinPulseWidth, kMaxPulseWidth, readFloat("osc2PW") - lfo * pwmDepth);
+        const float rootFrequency = smoothedRootFrequency.getNextValue();
+        const float detuneRatio = smoothedDetune.getNextValue();
+        const float duty1 = juce::jlimit(kMinPulseWidth, kMaxPulseWidth, smoothedOsc1PW.getNextValue() + lfo * pwmDepth);
+        const float duty2 = juce::jlimit(kMinPulseWidth, kMaxPulseWidth, smoothedOsc2PW.getNextValue() - lfo * pwmDepth);
 
         const float osc1Sample = osc1.process(rootFrequency, duty1, static_cast<float>(currentSampleRate));
         const float osc2Sample = osc2.process(rootFrequency * detuneRatio, duty2, static_cast<float>(currentSampleRate));
         const float subSample = subOsc.process(rootFrequency * 0.5f, static_cast<float>(currentSampleRate));
 
+        const float oscMix = smoothedOscMix.getNextValue();
+        const float subLevel = smoothedSubLevel.getNextValue();
         float mixed = osc1Sample * (1.0f - oscMix) + osc2Sample * oscMix;
         mixed = (mixed * 0.72f) + (subSample * subLevel * 0.55f);
 
-        float driven = std::tanh(mixed * drive) / std::tanh(drive);
+        const float drive = smoothedDrive.getNextValue() * (1.0f + madness * 1.8f);
+        float driven = fastTanh(mixed * drive) / fastTanh(drive);
+
+        const float cutoff = juce::jlimit(30.0f, 16000.0f,
+            smoothedCutoff.getNextValue() * (1.0f + madness * 0.18f));
+        const float resonance = juce::jlimit(0.0f, 0.96f,
+            smoothedResonance.getNextValue() + madness * 0.10f);
+        if ((sample & 7) == 0)
+        {
+            lowpass.setCutoffFrequency(cutoff);
+            lowpass.setResonance(0.5f + resonance * 8.0f);
+        }
+
         float filtered = lowpass.processSample(0, driven);
+        const float attack = smoothedAttack.getNextValue();
+        const float release = smoothedRelease.getNextValue();
         float env = ampEnvelope.process(attack, release);
         float out = filtered * env;
-        out = onePoleHighpass(out, dcX1, dcY1, 0.995f);
-        out = std::tanh(out * 1.25f) * output;
+        out = onePoleHighpass(out, dcX1, dcY1, dcCoeff);
+        out = fastTanh(out * 1.25f) * smoothedOutputGain.getNextValue();
 
         left[sample] = out;
         if (right != nullptr)
@@ -244,9 +367,18 @@ void PWMMadnessAudioProcessor::AttackReleaseEnvelope::noteOff()
 float PWMMadnessAudioProcessor::AttackReleaseEnvelope::process(float attackSeconds, float releaseSeconds)
 {
     const float target = active ? 1.0f : 0.0f;
-    const float time = active ? attackSeconds : releaseSeconds;
-    const float coefficient = 1.0f - std::exp(-1.0f / (juce::jmax(0.001f, time) * static_cast<float>(sampleRate)));
-    value += (target - value) * coefficient;
+    if (attackSeconds != cachedAttackTime)
+    {
+        cachedAttackTime = attackSeconds;
+        attackCoeff = 1.0f - std::exp(-1.0f / (juce::jmax(0.001f, attackSeconds) * static_cast<float>(sampleRate)));
+    }
+    if (releaseSeconds != cachedReleaseTime)
+    {
+        cachedReleaseTime = releaseSeconds;
+        releaseCoeff = 1.0f - std::exp(-1.0f / (juce::jmax(0.001f, releaseSeconds) * static_cast<float>(sampleRate)));
+    }
+    const float coeff = active ? attackCoeff : releaseCoeff;
+    value += (target - value) * coeff;
     if (!active && value < 0.00001f)
         value = 0.0f;
     return value;
