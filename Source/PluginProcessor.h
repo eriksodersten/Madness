@@ -36,6 +36,46 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
+    struct OscDecimator
+    {
+        static constexpr int kTaps = 31;
+
+        void reset() { history.fill(0.0f); index = 0; }
+
+        void push(float sample)
+        {
+            history[(size_t)index] = sample;
+            index = (index + 1) % kTaps;
+        }
+
+        float read() const
+        {
+            float out = 0.0f;
+            int hi = index;
+            for (int t = 0; t < kTaps; ++t)
+            {
+                hi = (hi - 1 + kTaps) % kTaps;
+                out += kCoeffs[(size_t)t] * history[(size_t)hi];
+            }
+            return out;
+        }
+
+        std::array<float, kTaps> history {};
+        int index = 0;
+
+        inline static constexpr std::array<float, kTaps> kCoeffs
+        {
+            -0.0006479604f, -0.0014439791f, -0.0027022580f, -0.0044407449f,
+            -0.0061914846f, -0.0069591594f, -0.0053706761f,  0.0000000000f,
+             0.0102068186f,  0.0255224468f,  0.0451695882f,  0.0672889128f,
+             0.0891803950f,  0.1077806354f,  0.1202713177f,  0.1246722937f,
+             0.1202713177f,  0.1077806354f,  0.0891803950f,  0.0672889128f,
+             0.0451695882f,  0.0255224468f,  0.0102068186f,  0.0000000000f,
+            -0.0053706761f, -0.0069591594f, -0.0061914846f, -0.0044407449f,
+            -0.0027022580f, -0.0014439791f, -0.0006479604f
+        };
+    };
+
     struct PulseOscillator
     {
         void reset() { phase = 0.0f; }
@@ -92,6 +132,7 @@ private:
     AttackReleaseEnvelope ampEnvelope;
     juce::dsp::StateVariableTPTFilter<float> lowpass;
 
+    OscDecimator decimator;
     float lfoPhase = 0.0f;
     float currentMidiNote = 36.0f;
     bool gate = false;

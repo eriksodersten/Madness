@@ -78,6 +78,7 @@ void PWMMadnessAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBl
     subOsc.reset();
     ampEnvelope.prepare(sampleRate);
     ampEnvelope.reset();
+    decimator.reset();
     lfoPhase = 0.0f;
     dcX1 = 0.0f;
     dcY1 = 0.0f;
@@ -214,6 +215,7 @@ void PWMMadnessAudioProcessor::handleMidiMessage(const juce::MidiMessage& messag
     {
         currentMidiNote = static_cast<float>(message.getNoteNumber());
         gate = true;
+        decimator.reset();
         ampEnvelope.noteOn();
     }
     else if (message.isNoteOff() && message.getNoteNumber() == juce::roundToInt(currentMidiNote))
@@ -294,14 +296,19 @@ void PWMMadnessAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
         const float duty1 = juce::jlimit(kMinPulseWidth, kMaxPulseWidth, smoothedOsc1PW.getNextValue() + lfo * pwmDepth);
         const float duty2 = juce::jlimit(kMinPulseWidth, kMaxPulseWidth, smoothedOsc2PW.getNextValue() - lfo * pwmDepth);
 
-        const float osc1Sample = osc1.process(rootFrequency, duty1, static_cast<float>(currentSampleRate));
-        const float osc2Sample = osc2.process(rootFrequency * detuneRatio, duty2, static_cast<float>(currentSampleRate));
-        const float subSample = subOsc.process(rootFrequency * 0.5f, static_cast<float>(currentSampleRate));
-
         const float oscMix = smoothedOscMix.getNextValue();
         const float subLevel = smoothedSubLevel.getNextValue();
-        float mixed = osc1Sample * (1.0f - oscMix) + osc2Sample * oscMix;
-        mixed = (mixed * 0.72f) + (subSample * subLevel * 0.55f);
+        const float oscSampleRate = static_cast<float>(currentSampleRate) * 8.0f;
+        for (int os = 0; os < 8; ++os)
+        {
+            const float o1 = osc1.process(rootFrequency, duty1, oscSampleRate);
+            const float o2 = osc2.process(rootFrequency * detuneRatio, duty2, oscSampleRate);
+            decimator.push(o1 * (1.0f - oscMix) + o2 * oscMix);
+        }
+        const float tone = decimator.read() * 0.72f;
+
+        const float subSample = subOsc.process(rootFrequency * 0.5f, static_cast<float>(currentSampleRate));
+        float mixed = tone + subSample * subLevel * 0.55f;
 
         const float drive = smoothedDrive.getNextValue() * (1.0f + madness * 1.8f);
         float driven = fastTanh(mixed * drive) / fastTanh(drive);
