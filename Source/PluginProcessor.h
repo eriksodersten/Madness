@@ -129,11 +129,15 @@ private:
     PulseOscillator osc1;
     PulseOscillator osc2;
     SineOscillator subOsc;
+    SineOscillator superSubOsc;
     AttackReleaseEnvelope ampEnvelope;
     juce::dsp::StateVariableTPTFilter<float> lowpass;
 
     OscDecimator decimator;
     float lfoPhase = 0.0f;
+    float superSubFreqMult = 1.0f;
+    int sAndHCounter = 0;
+    juce::Random random;
     float currentMidiNote = 36.0f;
     bool gate = false;
     float dcX1 = 0.0f;

@@ -79,7 +79,10 @@ void PWMMadnessAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBl
     ampEnvelope.prepare(sampleRate);
     ampEnvelope.reset();
     decimator.reset();
+    superSubOsc.reset();
     lfoPhase = 0.0f;
+    superSubFreqMult = 1.0f;
+    sAndHCounter = 0;
     dcX1 = 0.0f;
     dcY1 = 0.0f;
     resetSmoothedValues(sampleRate);
@@ -287,9 +290,21 @@ void PWMMadnessAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
         const float pwmDepth = juce::jlimit(0.0f, 0.46f, smoothedPwmDepth.getNextValue() + madness * 0.20f);
         const float pwmRate = smoothedPwmRate.getNextValue() * (1.0f + madness * 0.35f);
 
-        lfoPhase += pwmRate / static_cast<float>(currentSampleRate);
+        const float sr = static_cast<float>(currentSampleRate);
+
+        lfoPhase += pwmRate / sr;
         lfoPhase -= std::floor(lfoPhase);
         const float lfo = std::sin(lfoPhase * juce::MathConstants<float>::twoPi);
+
+        // S&H super-sub: Madness styr rate (2–30 Hz) och spridning (±0–24 semitoner)
+        const int holdSamples = juce::jmax(1, (int)(sr / (2.0f + madness * 28.0f)));
+        if (++sAndHCounter >= holdSamples)
+        {
+            sAndHCounter = 0;
+            const float spread = madness * 24.0f;
+            const float offset = (random.nextFloat() * 2.0f - 1.0f) * spread;
+            superSubFreqMult = std::pow(2.0f, offset / 12.0f);
+        }
 
         const float rootFrequency = smoothedRootFrequency.getNextValue();
         const float detuneRatio = smoothedDetune.getNextValue();
@@ -298,7 +313,7 @@ void PWMMadnessAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
 
         const float oscMix = smoothedOscMix.getNextValue();
         const float subLevel = smoothedSubLevel.getNextValue();
-        const float oscSampleRate = static_cast<float>(currentSampleRate) * 8.0f;
+        const float oscSampleRate = sr * 8.0f;
         for (int os = 0; os < 8; ++os)
         {
             const float o1 = osc1.process(rootFrequency, duty1, oscSampleRate);
@@ -307,8 +322,9 @@ void PWMMadnessAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
         }
         const float tone = decimator.read() * 0.72f;
 
-        const float subSample = subOsc.process(rootFrequency * 0.5f, static_cast<float>(currentSampleRate));
-        float mixed = tone + subSample * subLevel * 0.55f;
+        const float subSample      = subOsc.process(rootFrequency * 0.5f, sr);
+        const float superSubSample = superSubOsc.process(rootFrequency * 0.25f * superSubFreqMult, sr);
+        float mixed = tone + subSample * subLevel * 0.55f + superSubSample * subLevel * 0.40f;
 
         const float drive = smoothedDrive.getNextValue() * (1.0f + madness * 1.8f);
         float driven = fastTanh(mixed * drive) / fastTanh(drive);
