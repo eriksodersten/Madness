@@ -50,7 +50,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PWMMadnessAudioProcessor::cr
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>("pwmDepth", "PWM Depth", 0.0f, 0.42f, 0.16f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>("pwmRate", "PWM Rate",
-        skewedRange(0.01f, 10.0f, 0.35f), 0.18f));
+        skewedRange(0.01f, 500.0f, 2.0f), 0.18f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>("filterCutoff", "Filter Cutoff",
         skewedRange(35.0f, 12000.0f, 420.0f), 900.0f));
