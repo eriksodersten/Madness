@@ -24,7 +24,8 @@ public:
     void positionComboBoxText(juce::ComboBox&, juce::Label&) override;
 };
 
-class PWMMadnessAudioProcessorEditor : public juce::AudioProcessorEditor
+class PWMMadnessAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                       private juce::Timer
 {
 public:
     explicit PWMMadnessAudioProcessorEditor(PWMMadnessAudioProcessor&);
@@ -40,6 +41,7 @@ private:
 
     void setupSlider(MadnessSlider&);
     juce::Rectangle<int> ref(float x, float y, float w, float h) const;
+    void timerCallback() override;
 
     PWMMadnessAudioProcessor& audioProcessor;
     PWMMadnessLookAndFeel lookAndFeel;
